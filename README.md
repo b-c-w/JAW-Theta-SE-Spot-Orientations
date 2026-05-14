@@ -23,7 +23,7 @@ Magnifier lens. Hovering over the β-field plot activates a 4× zoom lens that r
 Live updates. All inputs (A, B, grid spacing, plot radius, ellipse semi-axes eA and eB) are wired to update all three views simultaneously.
 
 Usage
-Open index.html in any modern browser. No build step, no dependencies, no server required — the entire tool is a single self-contained HTML file using vanilla JavaScript and the HTML5 Canvas API.
+Open "Theta SE spot orientation.html" in any modern browser. No build step, no dependencies, no server required — the entire tool is a single self-contained HTML file using vanilla JavaScript and the HTML5 Canvas API.
 
 Adjust the input fields at the top of the page to match the bar lengths and grid resolution of interest. The β-field plot, α(R) curve, and data table all redraw automatically. Hover over the β-field plot to activate the magnifier.
 
