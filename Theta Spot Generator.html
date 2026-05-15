@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Theta Ellipsometer — Spot Pattern Generator</title>
+<style>
+  body {
+    margin: 0;
+    background: #0b0f1a;
+    color: #dbe6ff;
+    font-family: 'Segoe UI', sans-serif;
+  }
+  h1 { font-size: 16px; margin: 12px 16px; color: #aac4ff; }
+  .panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 8px 16px;
+    border-bottom: 1px solid #1c2640;
+    align-items: center;
+  }
+  .panel label {
+    display: flex;
+    flex-direction: column;
+    font-size: 11px;
+    color: #aac4ff;
+  }
+  .panel label.inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+  .panel input {
+    background: #0e1320;
+    color: #dbe6ff;
+    border: 1px solid #1c2640;
+    padding: 3px 6px;
+    font-size: 12px;
+    border-radius: 3px;
+  }
+  .panel input.short { width: 70px; }
+  .panel input.long  { width: 220px; }
+  .panel button {
+    background: #1c2640;
+    color: #dbe6ff;
+    border: 1px solid #2a3a60;
+    padding: 5px 12px;
+    font-size: 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-left: 8px;
+  }
+  .panel button:hover { background: #25325a; }
+  .panel.inner-panel {
+    background: #0c1120;
+  }
+  .panel.inner-panel .panel-label {
+    font-size: 11px;
+    color: #aac4ff;
+    font-weight: bold;
+    margin-right: 4px;
+  }
+  canvas {
+    display: block;
+    margin: 12px auto;
+    background: #0e1320;
+    border: 1px solid #1c2640;
+  }
+  .legend {
+    text-align: center;
+    font-size: 11px;
+    color: #aac4ff;
+    margin-bottom: 12px;
+  }
+  .legend span { display: inline-block; margin: 0 10px; }
+  .swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    vertical-align: middle;
+    margin-right: 4px;
+    border-radius: 50%;
+  }
+</style>
+</head>
+<body>
+
+<h1>Theta Ellipsometer — Spot Pattern Generator</h1>
+
+<div class="panel">
+  <label>A (mm)<input id="inA" class="short" type="number" step="1" value="138"></label>
+  <label>B (mm)<input id="inB" class="short" type="number" step="1" value="43"></label>
+  <label>R_center (mm)<input id="inRc" class="short" type="number" step="5" value="130.79"></label>
+  <label>θ₀ (deg)<input id="inTheta0" class="short" type="number" step="5" value="90"></label>
+  <label>diag (mm)<input id="inDiag" class="short" type="number" step="0.5" value="19.76"></label>
+  <label>s (mm)<input id="inS" class="short" type="number" step="0.01" value="0.25"></label>
+  <label>i_max<input id="inImax" class="short" type="number" step="1" value="10"></label>
+  <label>N (step = 360°/N)<input id="inN" class="short" type="number" step="1" value="24"></label>
+  <label>k_max<input id="inKmax" class="short" type="number" step="1" value="99"></label>
+  <label>u_j list (mm)<input id="inUj" class="long" type="text" value="6.5, 8, 9.5, 12.5, 14, 15.5"></label>
+  <button id="btnDownload">Download Points (.txt)</button>
+</div>
+
+<div class="panel inner-panel">
+  <span class="panel-label">Inner row:</span>
+  <label class="inline"><input id="inInnerEnable" type="checkbox" checked> enabled</label>
+  <label>R_center₂ (mm)<input id="inRc2" class="short" type="number" step="5" value="100.42"></label>
+  <label>θ₀₂ (deg)<input id="inTheta02" class="short" type="number" step="5" value="90"></label>
+  <label>i_max₂<input id="inImax2" class="short" type="number" step="1" value="8"></label>
+  <label>N₂ (step = 360°/N₂)<input id="inN2" class="short" type="number" step="1" value="18"></label>
+</div>
+
+<canvas id="patternCanvas" width="720" height="720"></canvas>
+<div class="legend">
+  <span><span class="swatch" style="background:#22d3ee"></span>centers</span>
+  <span><span class="swatch" style="background:#22d3ee;border-radius:0;width:14px;height:2px"></span>box corners</span>
+  <span><span class="swatch" style="background:#f59e0b"></span>spot points</span>
+</div>
+
+<script>
+// ---------- Shared geometry (identical signature to the first tool) ----------
+const DEG2RAD = Math.PI / 180;
+const RAD2DEG = 180 / Math.PI;
+
+let lastPoints = [];
+
+function computeAngles(x, y, A, B) {
+  const R = Math.sqrt(x * x + y * y);
+  const D = Math.sqrt(A * A + B * B);
+  const C = D;
+  const out = { R, D, C, theta: null, alpha1: null, alpha2: null, alpha: null, beta: null, invalid: false };
+
+  if (R < 1e-9) {
+    out.theta = 0; out.alpha1 = 0; out.alpha2 = 0; out.alpha = 0; out.beta = 0;
+    return out;
+  }
+  if (D < 1e-9) { out.invalid = true; return out; }
+
+  out.theta = Math.atan2(y, x);
+  out.alpha1 = Math.atan2(B, A);
+
+  const cosArg = R / (2 * D);
+  if (cosArg < -1 || cosArg > 1) { out.invalid = true; return out; }
+
+  out.alpha2 = Math.acos(cosArg);
+  out.alpha = out.alpha1 + out.alpha2;
+  out.beta = out.theta - out.alpha;
+  return out;
+}
+
+// ---------- Pattern generation ----------
+function parseUjList(str) {
+  return str.split(/[,\s]+/).map(s => parseFloat(s)).filter(v => Number.isFinite(v));
+}
+
+function generatePattern(params) {
+  const { A, B, Rc, theta0, diag, s, iMax, N, kMax, ujList } = params;
+  if (!Number.isFinite(N) || N <= 0) return { centers: [], points: [], boxes: [] };
+
+  const t0rad = theta0 * DEG2RAD;
+  const dTheta = (2 * Math.PI) / N;
+  const centers = [];
+  const points  = [];
+  const boxes   = []; // each entry: array of 4 {x,y} corners
+
+  for (let i = 0; i <= iMax; i++) {
+    const ang = dTheta * i + t0rad;
+    const xc = Rc * Math.cos(ang);
+    const yc = Rc * Math.sin(ang);
+
+    const r = computeAngles(xc, yc, A, B);
+    if (r.invalid) {
+      centers.push({ x: xc, y: yc, invalid: true });
+      continue;
+    }
+    const beta = r.beta;
+    centers.push({ x: xc, y: yc, beta, invalid: false });
+
+    // Four box corners: x = xc - diag*cos(beta - π/4 + π/2 * l), l = 0..3
+    const corners = [];
+    for (let l = 0; l < 4; l++) {
+      const phi = beta - Math.PI / 4 + (Math.PI / 2) * l;
+      corners.push({
+        x: xc - diag * Math.cos(phi),
+        y: yc - diag * Math.sin(phi)
+      });
+    }
+    boxes.push(corners);
+
+    const cosB  = Math.cos(beta);
+    const sinB  = Math.sin(beta);
+    const cosBm = Math.cos(beta - Math.PI / 4);
+    const sinBm = Math.sin(beta - Math.PI / 4);
+    const cosBp = Math.cos(beta - Math.PI / 2);
+    const sinBp = Math.sin(beta - Math.PI / 2);
+
+    for (const uj of ujList) {
+      for (let k = 0; k <= kMax; k++) {
+        const x = xc - diag * cosBm + uj * cosB + s * cosBp * k;
+        const y = yc - diag * sinBm + uj * sinB + s * sinBp * k;
+        points.push({ x, y });
+      }
+    }
+  }
+  return { centers, points, boxes };
+}
+
+// ---------- Drawing ----------
+const canvas = document.getElementById('patternCanvas');
+const ctx = canvas.getContext('2d');
+const PLOT_RADIUS = 150; // mm, fixed as requested
+
+function drawPattern() {
+  const A      = parseFloat(document.getElementById('inA').value);
+  const B      = parseFloat(document.getElementById('inB').value);
+  const Rc     = parseFloat(document.getElementById('inRc').value);
+  const theta0 = parseFloat(document.getElementById('inTheta0').value);
+  const diag   = parseFloat(document.getElementById('inDiag').value);
+  const s      = parseFloat(document.getElementById('inS').value);
+  const iMax   = parseInt(document.getElementById('inImax').value, 10);
+  const N      = parseInt(document.getElementById('inN').value, 10);
+  const kMax   = parseInt(document.getElementById('inKmax').value, 10);
+  const ujList = parseUjList(document.getElementById('inUj').value);
+
+  // Inner row params
+  const innerEnabled = document.getElementById('inInnerEnable').checked;
+  const Rc2     = parseFloat(document.getElementById('inRc2').value);
+  const theta02 = parseFloat(document.getElementById('inTheta02').value);
+  const iMax2   = parseInt(document.getElementById('inImax2').value, 10);
+  const N2      = parseInt(document.getElementById('inN2').value, 10);
+
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#0e1320';
+  ctx.fillRect(0, 0, W, H);
+
+  // Plot mapping: center of canvas = world origin; fit ±PLOT_RADIUS into the smaller dimension.
+  const PAD = 30;
+  const plotSize = Math.min(W, H) - 2 * PAD;
+  const ppm = plotSize / (2 * PLOT_RADIUS); // pixels per mm
+  const cx = W / 2, cy = H / 2;
+  const wx = gx => cx + gx * ppm;
+  const wy = gy => cy - gy * ppm;
+
+  // Bounding circle and axes
+  ctx.strokeStyle = '#1c2640';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, PLOT_RADIUS * ppm, 0, 2 * Math.PI);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(wx(-PLOT_RADIUS), cy); ctx.lineTo(wx(PLOT_RADIUS), cy);
+  ctx.moveTo(cx, wy(-PLOT_RADIUS)); ctx.lineTo(cx, wy(PLOT_RADIUS));
+  ctx.stroke();
+
+// Light grid every 25 mm
+  ctx.strokeStyle = 'rgba(170,196,255,0.06)';
+  for (let g = -150; g <= 150; g += 25) {
+    if (g === 0) continue;
+    ctx.beginPath(); ctx.moveTo(wx(g), wy(-PLOT_RADIUS)); ctx.lineTo(wx(g), wy(PLOT_RADIUS)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(wx(-PLOT_RADIUS), wy(g)); ctx.lineTo(wx(PLOT_RADIUS), wy(g)); ctx.stroke();
+  }
+
+  // Generate outer row
+  const outer = generatePattern({
+    A, B, Rc, theta0, diag, s, iMax, N, kMax, ujList
+  });
+
+  // Generate inner row (if enabled)
+  let inner = { centers: [], points: [], boxes: [] };
+  if (innerEnabled) {
+    inner = generatePattern({
+      A, B, Rc: Rc2, theta0: theta02, diag, s, iMax: iMax2, N: N2, kMax, ujList
+    });
+  }
+
+  // Combined points list (used for export)
+  const allCenters = outer.centers.concat(inner.centers);
+  const allPoints  = outer.points.concat(inner.points);
+  const allBoxes   = outer.boxes.concat(inner.boxes);
+
+  lastPoints = allPoints;
+
+  // Spot points (amber) — drawn first so boxes/centers sit on top
+  ctx.fillStyle = '#f59e0b';
+  for (const p of allPoints) {
+    ctx.beginPath();
+    ctx.arc(wx(p.x), wy(p.y), 1.2, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  // Box outlines (cyan)
+  ctx.strokeStyle = '#22d3ee';
+  ctx.lineWidth = 1;
+  for (const corners of allBoxes) {
+    ctx.beginPath();
+    ctx.moveTo(wx(corners[0].x), wy(corners[0].y));
+    for (let l = 1; l < 4; l++) {
+      ctx.lineTo(wx(corners[l].x), wy(corners[l].y));
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  // Centers (cyan filled), drawn on top
+  ctx.fillStyle = '#22d3ee';
+  for (const c of allCenters) {
+    if (c.invalid) continue;
+    ctx.beginPath();
+    ctx.arc(wx(c.x), wy(c.y), 2.5, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  // Axis labels
+  ctx.fillStyle = '#6a7a9a';
+  ctx.font = '10px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.fillText('+x (mm)', wx(PLOT_RADIUS) - 24, cy - 4);
+  ctx.fillText('+y (mm)', cx + 28, wy(PLOT_RADIUS) + 12);
+}
+
+// ---------- Export ----------
+function formatNum(n) {
+  // JS uses lowercase 'e' for scientific notation; sample uses uppercase 'E'.
+  return n.toString().replace('e', 'E');
+}
+
+function formatPointsTxt(points) {
+  const lines = [];
+  lines.push('start_Scan Points');
+  lines.push('\t' + points.length + '\t');
+  for (const p of points) {
+    lines.push('\t' + formatNum(p.x) + '\t' + formatNum(p.y) + '\t0.0\t');
+  }
+  lines.push('end_Scan Points');
+  return lines.join('\n');
+}
+
+function downloadPoints() {
+  if (!lastPoints.length) return;
+  const text = formatPointsTxt(lastPoints);
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'scan_points.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Wire inputs
+['inA','inB','inRc','inTheta0','inDiag','inS','inImax','inN','inKmax','inUj',
+ 'inRc2','inTheta02','inImax2','inN2'].forEach(id => {
+  document.getElementById(id).addEventListener('input', drawPattern);
+});
+document.getElementById('inInnerEnable').addEventListener('change', drawPattern);
+
+document.getElementById('btnDownload').addEventListener('click', downloadPoints);
+
+drawPattern();
+</script>
+</body>
+</html>
